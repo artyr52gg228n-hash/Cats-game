@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<style>
+  html, body { margin: 0; min-height: 100vh; }
+  body { background: linear-gradient(180deg, #f9e6d8, #f1d0b6); font-family: sans-serif; touch-action: none; overflow: hidden; user-select: none; }
+  #top { display: flex; padding: 10px 8px; text-align: center; background: linear-gradient(180deg, #f8d8be, #f3c5a5); }
+  .card { flex: 1; margin: 0 6px; background: rgba(255,255,255,0.5); border-radius: 18px; padding: 6px 0 2px; font-size: 13px; letter-spacing: 2px; color: #8a5a3a; box-shadow: 0 2px 0 rgba(224,169,127,0.5); }
+  .card b { display: block; font-size: 40px; letter-spacing: 0; font-weight: 800; line-height: 1.1; }
+  #s { color: #f0a920; }
+  #b { color: #e86f6f; }
+  canvas { display: block; margin: 12px auto; border: 4px solid #e0a97f; border-radius: 18px; touch-action: none; box-shadow: 0 6px 18px rgba(160,90,50,0.25); }
+</style>
+</head>
+<body>
+<div id="top">
+  <div class="card">СЧЁТ<b id="s">0</b></div>
+  <div class="card">РЕКОРД<b id="b">0</b></div>
+</div>
+<canvas id="c"></canvas>
+<script>
+var c = document.getElementById("c");
+var ctx = c.getContext("2d");
+var dpr = Math.min(window.devicePixelRatio || 1, 2);
+var W = Math.min(innerWidth - 24, 420);
+var H = Math.floor(innerHeight * 0.6);
+var DANGER = 100;
+c.style.width = W + "px";
+c.style.height = H + "px";
+c.width = Math.round(W * dpr);
+c.height = Math.round(H * dpr);
+ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+// размеры котов по уровням
+var RAD = [16, 22, 29, 37, 46, 56, 66];
+var MAXL = RAD.length - 1;
+
+// внешний вид каждого кота
+var STY = [
+  { fur: "#f4b96b", ear: "#f7a8b0", belly: "#fbe3c2", spot: "#d98f3c", line: "#c9842f", pat: "stripes", eyes: "round", acc: "none", iris: "#7bc67e" },
+  { fur: "#f7c6d4", ear: "#f08fa8", belly: "#fff1f5", spot: "#e8a3b8", line: "#d98ba3", pat: "none",    eyes: "happy", acc: "bow",    accCol: "#e8457a", iris: "#ff9bb5" },
+  { fur: "#b9bec9", ear: "#f2a6b4", belly: "#eef0f4", spot: "#8a90a0", line: "#8a90a0", pat: "spots",   eyes: "round", acc: "none", iris: "#6fa8dc" },
+  { fur: "#8fd0ee", ear: "#f4a6c0", belly: "#e6f6fc", spot: "#4e9fc9", line: "#4e9fc9", pat: "patch",   eyes: "round", acc: "glasses", iris: "#4d6fbf" },
+  { fur: "#c3a2ec", ear: "#f4a6c0", belly: "#efe4fb", spot: "#a07ad4", line: "#8f6cc4", pat: "none",    eyes: "happy", acc: "party",  accCol: "#ff7aa8", iris: "#c28df0" },
+  { fur: "#f6dc6b", ear: "#f4a6a6", belly: "#fff6cf", spot: "#d9b030", line: "#cfa42a", pat: "stripes", eyes: "round", acc: "flower", iris: "#7fd0a0" },
+  { fur: "#ff8a65", ear: "#ffb3a0", belly: "#ffe0d2", spot: "#d4573a", line: "#c4482c", pat: "stripes", eyes: "round", acc: "crown", iris: "#ffb347" }
+];
+
+function shade(hex, p) {
+  var n = parseInt(hex.slice(1), 16);
+  var rr0 = n >> 16;
+  var gg0 = (n >> 8) & 255;
+  var bb0 = n & 255;
+  var target = p < 0 ? 0 : 255;
+  var amount = Math.abs(p);
+  rr0 = Math.round(rr0 + (target - rr0) * amount);
+  gg0 = Math.round(gg0 + (target - gg0) * amount);
+  bb0 = Math.round(bb0 + (target - bb0) * amount);
+  return "rgb(" + rr0 + "," + gg0 + "," + bb0 + ")";
+}
+for (var si = 0; si < STY.length; si++) {
+  STY[si].light = shade(STY[si].fur, 0.45);
+  STY[si].dark = shade(STY[si].fur, -0.14);
+}
+
+// красивый фон поля, рисуется один раз
+var bg = document.createElement("canvas");
+bg.width = c.width;
+bg.height = c.height;
+(function () {
+  var g = bg.getContext("2d");
+  g.scale(dpr, dpr);
+  var gr = g.createLinearGradient(0, 0, 0, H);
+  gr.addColorStop(0, "#fff6ec");
+  gr.addColorStop(1, "#fadfca");
+  g.fillStyle = gr;
+  g.fillRect(0, 0, W, H);
+  g.fillStyle = "rgba(224,169,127,0.16)";
+  var dots = [[-1.1, -0.6], [-0.4, -1.15], [0.4, -1.15], [1.1, -0.6]];
+  for (var i = 0; i < 16; i++) {
+    var px = ((i * 97) % 101) / 101 * W;
+    var py = ((i * 57 + 23) % 89) / 89 * H;
+    var sz = 7 + (i % 3) * 2;
+    g.save();
+    g.translate(px, py);
+    g.rotate(((i * 37) % 60 - 30) * Math.PI / 180);
+    g.beginPath(); g.ellipse(0, sz * 0.4, sz * 0.9, sz * 0.7, 0, 0, 7); g.fill();
+    for (var q = 0; q < dots.length; q++) {
+      g.beginPath(); g.arc(dots[q][0] * sz * 0.7, dots[q][1] * sz * 0.7, sz * 0.3, 0, 7); g.fill();
+    }
+    g.restore();
+  }
+  g.fillStyle = "rgba(224,169,127,0.25)";
+  g.fillRect(0, H - 8, W, 8);
+})();
+
+var cats = [], aimX = 0, cur = 0, nxt = 0, cool = 0, score = 0;
+var over = false, overAt = 0, touching = false, best = 0, now = 0, nextId = 1;
+var fx = [], rings = [], texts = [];
+
+// звук
+var AC = null, soundOn = true;
+function getAC() {
+  if (!AC) {
+    try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+  }
+  if (AC && AC.state === "suspended") AC.resume();
+  return AC;
+}
+function tone(freq, dur, type, vol, slideTo, delay) {
+  if (!soundOn) return;
+  var a = getAC();
+  if (!a) return;
+  var t0 = a.currentTime + (delay || 0);
+  var o = a.createOscillator();
+  var g = a.createGain();
+  o.type = type || "sine";
+  o.frequency.setValueAtTime(freq, t0);
+  if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t0 + dur);
+  g.gain.setValueAtTime(vol || 0.15, t0);
+  g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+  o.connect(g); g.connect(a.destination);
+  o.start(t0); o.stop(t0 + dur + 0.02);
+}
+function sndDrop() { tone(520, 0.12, "sine", 0.18, 260); }
+function sndMerge(lv) {
+  var base = 400 + lv * 70;
+  tone(base, 0.15, "triangle", 0.2);
+  tone(base * 1.5, 0.2, "triangle", 0.18, null, 0.07);
+}
+function sndBig() {
+  tone(660, 0.15, "square", 0.1);
+  tone(880, 0.15, "square", 0.1, null, 0.1);
+  tone(1320, 0.3, "square", 0.1, null, 0.2);
+}
+function sndOver() {
+  tone(400, 0.3, "sawtooth", 0.12, 150);
+  tone(300, 0.5, "sawtooth", 0.12, 90, 0.25);
+}
+
+try { best = +localStorage.getItem("best") || 0; } catch (e) {}
+
+function rnd() { return Math.floor(Math.random() * 3); }
+function show() {
+  document.getElementById("s").textContent = score;
+  document.getElementById("b").textContent = best;
+}
+function addScore(n) {
+  score += n;
+  if (score > best) {
+    best = score;
+    try { localStorage.setItem("best", best); } catch (e) {}
+  }
+  show();
+}
+function reset() {
+  cats = []; fx = []; rings = []; texts = [];
+  aimX = W / 2; cur = rnd(); nxt = rnd();
+  cool = 0; score = 0; over = false; touching = false; show();
+}
+function setAim(e) {
+  var rect = c.getBoundingClientRect();
+  var r = RAD[cur];
+  aimX = Math.max(r, Math.min(W - r, e.clientX - rect.left - c.clientLeft));
+}
+
+document.addEventListener("pointerdown", function (e) {
+  getAC();
+  if (over) return;
+  touching = true; setAim(e);
+});
+document.addEventListener("pointermove", function (e) {
+  if (touching && !over) setAim(e);
+});
+document.addEventListener("pointerup", function (e) {
+  if (over) { if (now - overAt > 700) reset(); return; }
+  if (!touching) return;
+  touching = false;
+  setAim(e);
+  if (cool > 0) return;
+  cats.push({ id: nextId++, x: aimX, y: RAD[cur] + 8, vx: 0, vy: 0, l: cur, r: RAD[cur], age: 0, dead: false, touch: false, pop: 0 });
+  cur = nxt; nxt = rnd(); cool = 30; sndDrop();
+  setAim(e);
+});
+
+function rr(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+function star(x, y, r) {
+  ctx.beginPath();
+  for (var i = 0; i < 8; i++) {
+    var rad = i % 2 ? r * 0.4 : r;
+    var ang = i * Math.PI / 4 - Math.PI / 2;
+    ctx.lineTo(x + Math.cos(ang) * rad, y + Math.sin(ang) * rad);
+  }
+  ctx.closePath(); ctx.fill();
+}
+function sh(on, r) {
+  if (on) {
+    ctx.shadowColor = "rgba(90,50,20,0.28)";
+    ctx.shadowBlur = r * 0.3 * dpr;
+    ctx.shadowOffsetY = r * 0.08 * dpr;
+  } else {
+    ctx.shadowColor = "transparent"; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+  }
+}
+  // рисуем красивого кота (медленный способ, используется только один раз для заготовок)
+function drawCatRaw(x, y, r, lv, alpha, blink, scale, rot) {
+  var s = STY[lv];
+  var sides = [-1, 1];
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(x, y);
+  if (rot) ctx.rotate(rot);
+  if (scale && scale !== 1) ctx.scale(scale, scale);
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  var lw = Math.max(1.5, r * 0.06);
+  var k, sd, i;
+
+  // уши
+  for (k = 0; k < 2; k++) {
+    sd = sides[k];
+    sh(true, r);
+    ctx.fillStyle = s.fur; ctx.strokeStyle = s.line; ctx.lineWidth = lw;
+    ctx.beginPath();
+    ctx.moveTo(sd * r * 0.95, -r * 0.1);
+    ctx.lineTo(sd * r * 0.75, -r * 1.35);
+    ctx.lineTo(sd * r * 0.15, -r * 0.85);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    sh(false);
+    ctx.fillStyle = s.ear;
+    ctx.beginPath();
+    ctx.moveTo(sd * r * 0.8, -r * 0.3);
+    ctx.lineTo(sd * r * 0.68, -r * 1.05);
+    ctx.lineTo(sd * r * 0.35, -r * 0.8);
+    ctx.closePath(); ctx.fill();
+  }
+
+  // голова с объёмом
+  var hg = ctx.createRadialGradient(-r * 0.35, -r * 0.45, r * 0.1, 0, 0, r * 1.1);
+  hg.addColorStop(0, s.light); hg.addColorStop(0.55, s.fur); hg.addColorStop(1, s.dark);
+  sh(true, r);
+  ctx.fillStyle = hg; ctx.strokeStyle = s.line; ctx.lineWidth = lw;
+  ctx.beginPath(); ctx.ellipse(0, 0, r, r * 0.92, 0, 0, 7); ctx.fill(); ctx.stroke();
+  sh(false);
+
+  // узор на шерсти
+  if (s.pat === "stripes") {
+    ctx.strokeStyle = s.spot; ctx.lineWidth = Math.max(1.5, r * 0.07);
+    for (i = -1; i <= 1; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * r * 0.22, -r * 0.88);
+      ctx.lineTo(i * r * 0.16, -r * 0.5);
+      ctx.stroke();
+    }
+  } else if (s.pat === "spots") {
+    ctx.fillStyle = s.spot;
+    ctx.beginPath(); ctx.arc(-r * 0.5, -r * 0.5, r * 0.17, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(r * 0.55, -r * 0.32, r * 0.2, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(r * 0.15, -r * 0.7, r * 0.1, 0, 7); ctx.fill();
+  } else if (s.pat === "patch") {
+    ctx.fillStyle = s.spot;
+    ctx.beginPath(); ctx.ellipse(-r * 0.38, -r * 0.1, r * 0.3, r * 0.28, 0, 0, 7); ctx.fill();
+  }
+
+  // блик на голове
+  ctx.fillStyle = "rgba(255,255,255,0.28)";
+  ctx.beginPath(); ctx.ellipse(-r * 0.42, -r * 0.62, r * 0.22, r * 0.11, -0.6, 0, 7); ctx.fill();
+
+  // мордочка
+  ctx.fillStyle = s.belly;
+  ctx.beginPath(); ctx.ellipse(0, r * 0.36, r * 0.52, r * 0.4, 0, 0, 7); ctx.fill();
+
+  // румянец
+  ctx.fillStyle = "rgba(255,110,140,0.35)";
+  ctx.beginPath(); ctx.arc(-r * 0.62, r * 0.25, r * 0.15, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(r * 0.62, r * 0.25, r * 0.15, 0, 7); ctx.fill();
+
+  // глаза
+  for (k = 0; k < 2; k++) {
+    sd = sides[k];
+    var ex = sd * r * 0.38, ey = -r * 0.08;
+    if (s.eyes === "happy") {
+      ctx.strokeStyle = "#333"; ctx.lineWidth = Math.max(1.5, r * 0.08);
+      ctx.beginPath(); ctx.arc(ex, ey + r * 0.06, r * 0.16, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
+    } else if (blink) {
+      ctx.strokeStyle = "#333"; ctx.lineWidth = Math.max(1.5, r * 0.08);
+      ctx.beginPath(); ctx.arc(ex, ey - r * 0.02, r * 0.14, Math.PI * 0.1, Math.PI * 0.9); ctx.stroke();
+    } else {
+      ctx.fillStyle = "#262633";
+      ctx.beginPath(); ctx.ellipse(ex, ey, r * 0.16, r * 0.2, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = s.iris;
+      ctx.beginPath(); ctx.ellipse(ex, ey + r * 0.06, r * 0.12, r * 0.1, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = "#262633";
+      ctx.beginPath(); ctx.ellipse(ex, ey + r * 0.02, r * 0.075, r * 0.1, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = "#fff";
+      ctx.beginPath(); ctx.arc(ex + r * 0.05, ey - r * 0.07, r * 0.065, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(ex - r * 0.04, ey + r * 0.08, r * 0.03, 0, 7); ctx.fill();
+    }
+  }
+
+  // носик и ротик
+  ctx.fillStyle = "#e57b8a";
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.08, r * 0.17); ctx.lineTo(r * 0.08, r * 0.17); ctx.lineTo(0, r * 0.26);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = "#8a4b3a"; ctx.lineWidth = Math.max(1, r * 0.04);
+  ctx.beginPath(); ctx.arc(-r * 0.1, r * 0.26, r * 0.1, 0, Math.PI); ctx.stroke();
+  ctx.beginPath(); ctx.arc(r * 0.1, r * 0.26, r * 0.1, 0, Math.PI); ctx.stroke();
+
+  // усики
+  ctx.strokeStyle = "rgba(90,60,40,0.5)"; ctx.lineWidth = Math.max(1, r * 0.035);
+  for (k = 0; k < 2; k++) {
+    sd = sides[k];
+    ctx.beginPath(); ctx.moveTo(sd * r * 0.5, r * 0.3); ctx.lineTo(sd * r * 1.1, r * 0.2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(sd * r * 0.5, r * 0.42); ctx.lineTo(sd * r * 1.05, r * 0.5); ctx.stroke();
+  }
+
+  // аксессуары
+  if (s.acc === "bow") {
+    ctx.fillStyle = s.accCol;
+    ctx.beginPath(); ctx.moveTo(r * 0.55, -r * 0.8); ctx.lineTo(r * 0.95, -r * 1.0); ctx.lineTo(r * 0.95, -r * 0.6); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(r * 0.55, -r * 0.8); ctx.lineTo(r * 0.15, -r * 1.0); ctx.lineTo(r * 0.15, -r * 0.6); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.arc(r * 0.55, -r * 0.8, r * 0.1, 0, 7); ctx.fill();
+  } else if (s.acc === "glasses") {
+    ctx.strokeStyle = "#33415c"; ctx.lineWidth = Math.max(1.5, r * 0.06);
+    ctx.beginPath(); ctx.arc(-r * 0.38, -r * 0.08, r * 0.27, 0, 7); ctx.stroke();
+    ctx.beginPath(); ctx.arc(r * 0.38, -r * 0.08, r * 0.27, 0, 7); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-r * 0.11, -r * 0.08); ctx.lineTo(r * 0.11, -r * 0.08); ctx.stroke();
+  } else if (s.acc === "party") {
+    ctx.fillStyle = s.accCol;
+    ctx.beginPath(); ctx.moveTo(-r * 0.4, -r * 0.8); ctx.lineTo(r * 0.4, -r * 0.8); ctx.lineTo(0, -r * 1.8); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = Math.max(1.5, r * 0.07);
+    ctx.beginPath(); ctx.moveTo(-r * 0.25, -r * 1.05); ctx.lineTo(r * 0.25, -r * 1.2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-r * 0.12, -r * 1.4); ctx.lineTo(r * 0.12, -r * 1.5); ctx.stroke();
+    ctx.fillStyle = "#ffe066";
+    ctx.beginPath(); ctx.arc(0, -r * 1.8, r * 0.12, 0, 7); ctx.fill();
+  } else if (s.acc === "flower") {
+    var fx2 = r * 0.7, fy2 = -r * 0.75;
+    ctx.fillStyle = "#ff8fb1";
+    for (i = 0; i < 5; i++) {
+      var ang = i * Math.PI * 2 / 5;
+      ctx.beginPath(); ctx.arc(fx2 + Math.cos(ang) * r * 0.13, fy2 + Math.sin(ang) * r * 0.13, r * 0.11, 0, 7); ctx.fill();
+    }
+    ctx.fillStyle = "#ffd54a";
+    ctx.beginPath(); ctx.arc(fx2, fy2, r * 0.09, 0, 7); ctx.fill();
+  } else if (s.acc === "crown") {
+    ctx.fillStyle = "#ffd54a"; ctx.strokeStyle = "#e0a800"; ctx.lineWidth = Math.max(1.5, r * 0.05);
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.5, -r * 0.78);
+    ctx.lineTo(-r * 0.55, -r * 1.4);
+    ctx.lineTo(-r * 0.25, -r * 1.1);
+    ctx.lineTo(0, -r * 1.5);
+    ctx.lineTo(r * 0.25, -r * 1.1);
+    ctx.lineTo(r * 0.55, -r * 1.4);
+    ctx.lineTo(r * 0.5, -r * 0.78);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#e53935";
+    ctx.beginPath(); ctx.arc(0, -r * 0.95, r * 0.09, 0, 7); ctx.fill();
+    ctx.fillStyle = "#42a5f5";
+    ctx.beginPath(); ctx.arc(-r * 0.3, -r * 0.92, r * 0.06, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(r * 0.3, -r * 0.92, r * 0.06, 0, 7); ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+// кэш заготовок: каждый кот рисуется один раз, потом копируется
+var sprites = {};
+function getSprite(lv, bl) {
+  var key = lv * 2 + bl;
+  if (sprites[key]) return sprites[key];
+  var r = RAD[lv];
+  var cv = document.createElement("canvas");
+  cv.width = Math.ceil(r * 2.8 * dpr);
+  cv.height = Math.ceil(r * 3.5 * dpr);
+  var sc = cv.getContext("2d");
+  sc.setTransform(dpr, 0, 0, dpr, 0, 0);
+  var mainCtx = ctx;
+  ctx = sc;
+  drawCatRaw(r * 1.4, r * 2.2, r, lv, 1, bl === 1, 1, 0);
+  ctx = mainCtx;
+  var sp = { cv: cv, w: cv.width / dpr, h: cv.height / dpr, ox: r * 1.4, oy: r * 2.2 };
+  sprites[key] = sp;
+  return sp;
+}
+
+// быстрый способ: просто копирует готовую заготовку
+function drawCat(x, y, r, lv, alpha, blink, scale, rot) {
+  var sp = getSprite(lv, blink ? 1 : 0);
+  var k = (r / RAD[lv]) * (scale || 1);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(x, y);
+  if (rot) ctx.rotate(rot);
+  ctx.scale(k, k);
+  ctx.drawImage(sp.cv, -sp.ox, -sp.oy, sp.w, sp.h);
+  ctx.restore();
+}
+
+for (var pl = 0; pl < RAD.length; pl++) { getSprite(pl, 0); getSprite(pl, 1); }
+  // эффекты при объединении
+function burst(x, y, lv, big) {
+  var n = big ? 22 : 12;
+  for (var i = 0; i < n; i++) {
+    var ang = Math.random() * Math.PI * 2;
+    var sp = 1.5 + Math.random() * (big ? 5 : 3.5);
+    fx.push({
+      x: x, y: y, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp - 1,
+      life: 0, max: 30 + Math.random() * 20, size: 3 + Math.random() * 4,
+      col: i % 2 ? "#ffd54a" : STY[lv].light, star: i % 3 === 0
+    });
+  }
+  rings.push({ x: x, y: y, r: RAD[lv] * 0.6, life: 0, max: 22, col: STY[lv].fur });
+}
+
+function update() {
+  var i, j, k, a, b;
+  for (i = 0; i < fx.length; i++) {
+    a = fx[i]; a.life++; a.x += a.vx; a.y += a.vy; a.vy += 0.12; a.vx *= 0.98;
+  }
+  fx = fx.filter(function (p) { return p.life < p.max; });
+  for (i = 0; i < rings.length; i++) { rings[i].life++; rings[i].r += 2.2; }
+  rings = rings.filter(function (g) { return g.life < g.max; });
+  for (i = 0; i < texts.length; i++) texts[i].t++;
+  texts = texts.filter(function (t) { return t.t < t.max; });
+
+  if (over) return;
+  if (cool > 0) cool--;
+
+  for (i = 0; i < cats.length; i++) {
+    a = cats[i];
+    a.age++; a.touch = false;
+    if (a.pop > 0) a.pop--;
+    a.vy += 0.5; a.vx *= 0.99;
+    a.x += a.vx; a.y += a.vy;
+  }
+
+  for (k = 0; k < 6; k++) {
+    for (i = 0; i < cats.length; i++) {
+      for (j = i + 1; j < cats.length; j++) {
+        a = cats[i]; b = cats[j];
+        var dx = b.x - a.x, dy = b.y - a.y;
+        var d = Math.hypot(dx, dy) || 0.01;
+        var min = a.r + b.r;
+        if (d < min) {
+          a.touch = true; b.touch = true;
+          var nx = dx / d, ny = dy / d;
+          var o = (min - d) * 0.8;
+          var m1 = a.r * a.r, m2 = b.r * b.r, tot = m1 + m2;
+          a.x -= nx * o * (m2 / tot); a.y -= ny * o * (m2 / tot);
+          b.x += nx * o * (m1 / tot); b.y += ny * o * (m1 / tot);
+          var rv = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+          if (rv < 0) {
+            var e = rv < -2 ? 0.15 : 0;
+            var imp = -(1 + e) * rv / (1 / m1 + 1 / m2);
+            a.vx -= imp * nx / m1; a.vy -= imp * ny / m1;
+            b.vx += imp * nx / m2; b.vy += imp * ny / m2;
+          }
+        }
+      }
+    }
+    for (i = 0; i < cats.length; i++) {
+      a = cats[i];
+      if (a.x < a.r) { a.x = a.r; a.vx *= -0.3; a.touch = true; }
+      if (a.x > W - a.r) { a.x = W - a.r; a.vx *= -0.3; a.touch = true; }
+      if (a.y > H - a.r) {
+        a.y = H - a.r; a.touch = true;
+        a.vy = Math.abs(a.vy) > 2 ? a.vy * -0.15 : 0;
+        a.vx *= 0.9;
+      }
+    }
+  }
+
+  // трение и "засыпание": спокойные коты замирают
+  for (i = 0; i < cats.length; i++) {
+    a = cats[i];
+    if (a.touch) {
+      a.vx *= 0.92;
+      if (Math.hypot(a.vx, a.vy) < 0.5) { a.vx = 0; a.vy = 0; }
+    }
+  }
+
+  // объединение одинаковых котов
+  var born = [];
+  for (i = 0; i < cats.length; i++) {
+    a = cats[i];
+    if (a.dead) continue;
+    for (j = i + 1; j < cats.length; j++) {
+      b = cats[j];
+      if (b.dead || b.l !== a.l) continue;
+      if (Math.hypot(b.x - a.x, b.y - a.y) < a.r + b.r + 1) {
+        a.dead = true; b.dead = true;
+        var mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+        if (a.l >= MAXL) {
+          addScore(100); sndBig();
+          burst(mx, my, MAXL, true);
+          texts.push({ x: mx, y: my, t: 0, max: 60, txt: "+100" });
+        } else {
+          var nl = a.l + 1;
+          born.push({
+            id: nextId++, x: mx, y: my, vx: 0, vy: 0,
+            l: nl, r: RAD[nl], age: 100, dead: false, touch: false, pop: 20
+          });
+          var pts = (nl + 1) * 2;
+          addScore(pts); sndMerge(nl);
+          burst(mx, my, nl, false);
+          texts.push({ x: mx, y: my - RAD[nl], t: 0, max: 50, txt: "+" + pts });
+        }
+        break;
+      }
+    }
+  }
+  cats = cats.filter(function (q) { return !q.dead; }).concat(born);
+
+  for (i = 0; i < cats.length; i++) {
+    a = cats[i];
+    if (a.age > 90 && Math.abs(a.vy) < 2 && a.y - a.r < DANGER && !over) { over = true; overAt = now; sndOver(); }
+  }
+}
+
+function draw() {
+  var i, a, p, g, t;
+  ctx.drawImage(bg, 0, 0, W, H);
+
+  // линия опасности, пульсирует когда коты близко
+  var topY = 1e9;
+  for (i = 0; i < cats.length; i++) {
+    if (cats[i].age > 60) topY = Math.min(topY, cats[i].y - cats[i].r);
+  }
+  var pulse = topY < DANGER + 70 ? 0.5 + 0.5 * Math.sin(now / 120) : 0;
+  ctx.strokeStyle = "rgba(232,111,111," + (0.55 + 0.4 * pulse) + ")";
+  ctx.setLineDash([8, 8]); ctx.lineWidth = 2 + pulse * 2;
+  ctx.beginPath(); ctx.moveTo(0, DANGER); ctx.lineTo(W, DANGER); ctx.stroke();
+  ctx.setLineDash([]);
+
+  for (i = 0; i < cats.length; i++) {
+    a = cats[i];
+    var blinking = (now + a.id * 977) % 3400 < 130;
+    var sc = a.pop > 0 ? 1 + 0.3 * Math.sin(a.pop / 20 * Math.PI) : 1;
+    var rot = Math.max(-0.35, Math.min(0.35, a.vx * 0.05));
+    drawCat(a.x, a.y, a.r, a.l, 1, blinking, sc, rot);
+  }
+
+  // кольца и звёздочки
+  for (i = 0; i < rings.length; i++) {
+    g = rings[i];
+    ctx.strokeStyle = g.col; ctx.globalAlpha = 1 - g.life / g.max;
+    ctx.lineWidth = 4 * (1 - g.life / g.max) + 1;
+    ctx.beginPath(); ctx.arc(g.x, g.y, g.r, 0, 7); ctx.stroke();
+  }
+  for (i = 0; i < fx.length; i++) {
+    p = fx[i];
+    ctx.globalAlpha = 1 - p.life / p.max;
+    ctx.fillStyle = p.col;
+    if (p.star) star(p.x, p.y, p.size * 1.4);
+    else { ctx.beginPath(); ctx.arc(p.x, p.y, p.size * 0.6, 0, 7); ctx.fill(); }
+  }
+  ctx.globalAlpha = 1;
+
+  // всплывающие очки
+  ctx.textAlign = "center";
+  for (i = 0; i < texts.length; i++) {
+    t = texts[i];
+    ctx.globalAlpha = 1 - t.t / t.max;
+    ctx.font = "bold 20px sans-serif";
+    ctx.lineWidth = 4; ctx.strokeStyle = "#fff";
+    ctx.strokeText(t.txt, t.x, t.y - t.t * 0.8);
+    ctx.fillStyle = "#e8572a";
+    ctx.fillText(t.txt, t.x, t.y - t.t * 0.8);
+  }
+  ctx.globalAlpha = 1; ctx.textAlign = "left";
+
+  var r = RAD[cur];
+
+  // пунктирная полосочка вниз до дна
+  ctx.strokeStyle = "#d9a37a"; ctx.setLineDash([2, 10]); ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(aimX, r * 2 + 8); ctx.lineTo(aimX, H); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // кот в руке
+  drawCat(aimX, r + 8, r, cur, cool > 0 ? 0.3 : 1, now % 3400 < 130, 1, 0);
+
+  // следующий кот
+  rr(6, 6, 64, 66, 16);
+  ctx.fillStyle = "rgba(255,255,255,0.6)"; ctx.fill();
+  ctx.strokeStyle = "rgba(224,169,127,0.6)"; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = "#a07050"; ctx.font = "bold 12px sans-serif";
+  ctx.fillText("Далее", 15, 22);
+  drawCat(38, 52, 12, nxt, 1, false, 1, 0);
+
+  if (over) {
+    ctx.fillStyle = "rgba(60,30,20,0.45)"; ctx.fillRect(0, 0, W, H);
+    var pw = Math.min(280, W - 30), ph = 150, px = (W - pw) / 2, py = (H - ph) / 2;
+    rr(px, py, pw, ph, 22);
+    ctx.fillStyle = "#fff6ec"; ctx.fill();
+    ctx.strokeStyle = "#e0a97f"; ctx.lineWidth = 4; ctx.stroke();
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#a0522d"; ctx.font = "bold 26px sans-serif";
+    ctx.fillText("Игра окончена", W / 2, py + 45);
+    ctx.fillStyle = "#c97a3c"; ctx.font = "bold 18px sans-serif";
+    ctx.fillText("Счёт: " + score, W / 2, py + 80);
+    ctx.fillStyle = "#a07050"; ctx.font = "15px sans-serif";
+    ctx.fillText("Коснитесь, чтобы начать заново", W / 2, py + 115);
+    ctx.textAlign = "left";
+  }
+}
+
+var last = 0, acc = 0;
+function loop(t) {
+  now = t;
+  acc += Math.min(t - last, 50); last = t;
+  while (acc >= 16.67) { update(); acc -= 16.67; }
+  draw();
+  requestAnimationFrame(loop);
+}
+reset();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
